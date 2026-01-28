@@ -1,0 +1,13 @@
+{
+  "name": "gpu-fan-control",
+  "version": "1.0.0",
+  "description": "A tool for controlling GPU fan speeds",
+  "main": "gpu-fan-control.sh",
+  "scripts": {
+    "start": "./gpu-fan-control.sh",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["gpu", "fan", "control", "nvidia", "amd"],
+  "author": "GPU Fan Control Team",
+  "license": "MIT"
+}
