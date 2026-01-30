@@ -13,6 +13,7 @@ MIN_TEMP=40
 MAX_TEMP=85
 MIN_PWM=30
 MAX_PWM=255
+HYSTERESIS=2  # Temperature hysteresis in degrees Celsius
 
 # Function to display help
 show_help() {
@@ -71,6 +72,41 @@ get_gpu_temp() {
         echo $((temp / 1000))
     else
         echo 0
+    fi
+}
+
+# Function to calculate PWM with hysteresis to prevent oscillation
+calculate_pwm_with_hysteresis() {
+    local current_temp=$1
+    local current_pwm=$2
+    
+    # If we're currently running the fan and temperature drops below threshold
+    # we should keep the fan running to prevent oscillation
+    if [[ $current_pwm -gt 0 ]] && [[ $current_temp -lt $((MIN_TEMP + HYSTERESIS)) ]]; then
+        # Keep fan running at current speed (hysteresis effect)
+        echo $current_pwm
+        return
+    fi
+    
+    # Calculate PWM value based on temperature for GPU_FAN
+    # Linear mapping from MIN_TEMP to MAX_TEMP
+    if [ $current_temp -ge $MAX_TEMP ]; then
+        echo $MAX_PWM
+    else
+        # Calculate PWM value with hysteresis consideration
+        local temp_range=$((MAX_TEMP - MIN_TEMP))
+        local pwm_range=$((MAX_PWM - MIN_PWM))
+        local temp_offset=$((current_temp - MIN_TEMP))
+        local pwm_value=$((MIN_PWM + (temp_offset * pwm_range) / temp_range))
+        
+        # Ensure value is in valid range
+        if [ $pwm_value -lt $MIN_PWM ]; then
+            echo $MIN_PWM
+        elif [ $pwm_value -gt $MAX_PWM ]; then
+            echo $MAX_PWM
+        else
+            echo $pwm_value
+        fi
     fi
 }
 
@@ -204,38 +240,29 @@ fi
 echo "Starting GPU Fan Control..."
 echo "Monitoring GPU temperature and controlling GPU fan"
 
+# Initialize current PWM value
+current_pwm=0
+
 while true; do
     gpu_temp=$(get_gpu_temp)
     
-    # Control fan based on GPU temperature
+    # Control fan based on GPU temperature with hysteresis
     if [ $gpu_temp -gt 0 ]; then
-        if [ $gpu_temp -ge $MIN_TEMP ]; then
-            # Calculate PWM value based on temperature for GPU_FAN
-            # Linear mapping from MIN_TEMP to MAX_TEMP
-            if [ $gpu_temp -ge $MAX_TEMP ]; then
-                gpu_fan_pwm_value=$MAX_PWM
-            else
-                gpu_fan_pwm_value=$((MIN_PWM + (MAX_PWM - MIN_PWM) * (gpu_temp - MIN_TEMP) / (MAX_TEMP - MIN_TEMP)))
-            fi
-            # Ensure value is in valid range
-            if [ $gpu_fan_pwm_value -lt $MIN_PWM ]; then
-                gpu_fan_pwm_value=$MIN_PWM
-            fi
-            if [ $gpu_fan_pwm_value -gt $MAX_PWM ]; then
-                gpu_fan_pwm_value=$MAX_PWM
-            fi
-        else
-            # Set minimum PWM when temperature is below threshold
-            gpu_fan_pwm_value=$MIN_PWM
+        # Calculate new PWM value with hysteresis to prevent oscillation
+        gpu_fan_pwm_value=$(calculate_pwm_with_hysteresis $gpu_temp $current_pwm)
+        
+        # Only update PWM if it changed significantly
+        if [ $gpu_fan_pwm_value -ne $current_pwm ]; then
+            echo "$(date): GPU Temp: ${gpu_temp}°C, GPU Fan PWM: $gpu_fan_pwm_value"
+            current_pwm=$gpu_fan_pwm_value
         fi
-        echo "$(date): GPU Temp: ${gpu_temp}°C, GPU Fan PWM: $gpu_fan_pwm_value"
     else
         echo "$(date): Error reading GPU temperature"
     fi
     
     # Set fan
     if [ -w "$GPU_FAN_PWM" ]; then
-        echo $gpu_fan_pwm_value > "$GPU_FAN_PWM"
+        echo $current_pwm > "$GPU_FAN_PWM"
     fi
     
     sleep 10
