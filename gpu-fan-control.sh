@@ -10,7 +10,7 @@ PWM_ENABLE="/sys/class/hwmon/hwmon1/pwm3_enable"
 # Fan control settings
 MIN_PWM=90
 MAX_PWM=210
-TEMP_THRESHOLD_HIGH=60
+TEMP_THRESHOLD_HIGH=65
 TEMP_THRESHOLD_LOW=35
 
 # Function to set PWM to manual mode
@@ -77,6 +77,10 @@ while true; do
             echo "Temperature below ${TEMP_THRESHOLD_LOW}°C - setting fan to minimum speed"
             set_fan_speed $MIN_PWM
             fan_state="low"
+        # If temperature is below low threshold but fan is already at low speed
+        elif [ $current_temp -le $TEMP_THRESHOLD_LOW ] && [ "$fan_state" = "low" ]; then
+            echo "Temperature below ${TEMP_THRESHOLD_LOW}°C - setting fan to 0 (off)"
+            set_fan_speed 0
         else
             # Temperature is between thresholds
             if [ "$fan_state" = "high" ]; then
