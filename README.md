@@ -4,13 +4,28 @@
 This script controls system fans based on GPU temperature. It provides automatic temperature-based fan control by reading GPU temperature sensors and adjusting system fan PWM values accordingly.
 
 ## Features
-- Automatic GPU temperature monitoring
-- Linear PWM fan speed control based on temperature
-- Manual fan speed testing capability
-- Sensor detection and validation
-- Configurable temperature and PWM ranges
+- Automatic GPU temperature monitoring (AMD MI50)
+- Two-wavelength hysteresis fan control (65°C / 35°C)
+- Two script variants: hardcoded paths or dynamic hwmon discovery
 - Systemd service integration for automatic startup
 - Installation and uninstallation scripts
+
+## Hardware
+This script is configured for:
+- **GPU**: AMD Instinct MI50 (PCI 0000:03:00)
+- **Temp sensor**: amdgpu hwmon device
+- **Fan controller**: it8628 Super I/O chip (motherboard fan header 3)
+
+## Variants
+
+### gpu-fan-control.sh (hardcoded)
+Uses fixed hwmon device indices. Simpler and faster startup, but will break if the kernel assigns different hwmon indices after a reboot or update.
+
+### gpu-fan-control-dynamic.sh (recommended)
+Dynamically discovers hwmon devices at startup by matching:
+- amdgpu → PCI address `0000:03:00` (the MI50)
+- it8628 → driver name (Super I/O fan controller)
+Resilient to hwmon index shifts — recommended if you want to avoid future breakage.
 
 ## Requirements
 - Linux system with hardware monitoring support
@@ -19,6 +34,22 @@ This script controls system fans based on GPU temperature. It provides automatic
 - Root privileges to access sensor files
 
 ## Installation
+
+### Automated Installation (recommended)
+Run the installation script as root:
+```bash
+sudo ./install.sh
+```
+
+### Install Dynamic Version
+To use the dynamic discovery script instead:
+```bash
+sudo cp gpu-fan-control-dynamic.sh /usr/local/bin/
+sudo chmod +x /usr/local/bin/gpu-fan-control-dynamic.sh
+sudo cp gpu-fan-control-dynamic.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now gpu-fan-control-dynamic.service
+```
 
 ### Manual Installation
 1. Copy script to `/usr/local/bin/gpu-fan-control.sh`
@@ -55,16 +86,19 @@ sudo ./uninstall.sh
 ## Configuration Variables
 
 ### Basic Settings
-- `GPU_TEMP_SENSOR`: Path to the GPU temperature sensor (default: `/sys/class/hwmon/hwmon2/temp1_input`)
-- `GPU_FAN_PWM`: Path to the GPU fan PWM control (default: `/sys/class/hwmon/hwmon6/pwm2`)
+- `GPU_TEMP_SENSOR`: Path to the GPU temperature sensor
+- `GPU_FAN_PWM`: Path to the fan PWM control
+- `PWM_ENABLE`: Path to the PWM enable control (set to 1 for manual mode)
 
 ### Temperature Thresholds
-- `MIN_TEMP`: Minimum temperature to start fan control (default: 40°C)
-- `MAX_TEMP`: Maximum temperature for full fan speed (default: 85°C)
+- `TEMP_THRESHOLD_HIGH`: Fan max speed activates above this (default: 65°C)
+- `TEMP_THRESHOLD_LOW`: Fan drops to min speed below this (default: 35°C)
 
 ### PWM Control Settings
-- `MIN_PWM`: Minimum PWM value (default: 30)
-- `MAX_PWM`: Maximum PWM value (default: 255)
+- `MIN_PWM`: Minimum PWM value for low fan speed (default: 90)
+- `MAX_PWM`: Maximum PWM value for high fan speed (default: 210)
+
+The hysteresis window (35°C–65°C) prevents the fan from oscillating between speeds.
 
 ## Sensor Detection
 
@@ -172,12 +206,17 @@ PWM values typically range from 0-255:
 2. **Sensor Paths**: Confirm sensor paths exist using detection commands
 3. **Fan Headers**: Verify your motherboard supports PWM control
 4. **Manual Mode**: Ensure PWM is in manual mode (`pwmX_enable` set to 1)
+5. **hwmon index shifts**: If the hardcoded script breaks after a kernel update, switch to the dynamic version
+
+### hwmon Index Shifts
+The kernel assigns hwmon indices dynamically. After a kernel update or module reload, indices can change (e.g., `hwmon1` → `hwmon3`). The **dynamic script** handles this automatically — if the hardcoded script stops working, see the install instructions above for the dynamic version.
 
 ### Sensor Detection Failure
 If sensors aren't found:
 - Check that hardware monitoring modules are loaded (`sudo modprobe hwmon`)
 - Verify hardware is properly detected (`lspci | grep VGA`)
 - Confirm correct paths using the detection commands above
+- Use the dynamic script variant which discovers devices automatically
 
 ## Customization
 

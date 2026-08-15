@@ -1,11 +1,13 @@
 #!/bin/bash
 # Simple GPU Fan Control Script with Hysteresis
 # Uses hardcoded device paths as specified
+# MI50 (03:00.0): amdgpu temp sensor on it8628 Super I/O fan controller
 
 # Device configuration
-GPU_TEMP_SENSOR="/sys/class/hwmon/hwmon3/temp1_input"
-GPU_FAN_PWM="/sys/class/hwmon/hwmon1/pwm3"
-PWM_ENABLE="/sys/class/hwmon/hwmon1/pwm3_enable"
+# amdgpu temp is at hwmon5, fan controlled via it8628 Super I/O at hwmon3/pwm3
+GPU_TEMP_SENSOR="/sys/class/hwmon/hwmon5/temp1_input"
+GPU_FAN_PWM="/sys/class/hwmon/hwmon3/pwm3"
+PWM_ENABLE="/sys/class/hwmon/hwmon3/pwm3_enable"
 
 # Fan control settings
 MIN_PWM=90
