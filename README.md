@@ -98,25 +98,16 @@ The script:
 
 ## Finding Your Devices
 
-If you need to adapt this to different hardware:
+Use `hw_scan.sh` to discover hwmon devices and verify the correct GPU/fan paths:
 
 ```bash
-# List all hwmon devices
-for h in /sys/class/hwmon/hwmon*; do
-  echo "$(basename $h): $(cat $h/name 2>/dev/null) → $(readlink -f $h)"
-done
-
-# Find your GPU's amdgpu device
-for h in /sys/class/hwmon/hwmon*; do
-  [ "$(cat $h/name 2>/dev/null)" = "amdgpu" ] && \
-    readlink -f $h | grep -q "0000:03:00" && echo "$(basename $h)"
-done
-
-# Find the Super I/O
-for h in /sys/class/hwmon/hwmon*; do
-  [ "$(cat $h/name 2>/dev/null)" = "it8628" ] && echo "$(basename $h)"
-done
+hw_scan.sh                              # all devices
+hw_scan.sh --pci 0000:03:00             # just the MI50
 ```
+
+This shows GPU names, PCI addresses, temps, fan RPM, and all motherboard fan headers with PWM values and control mode.
+
+If you need to adapt this to different hardware, update the device paths at the top of the script accordingly.
 
 ## Troubleshooting
 

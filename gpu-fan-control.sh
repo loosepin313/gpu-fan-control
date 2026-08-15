@@ -3,60 +3,6 @@
 # Uses hardcoded device paths as specified
 # MI50 (03:00.0): amdgpu temp sensor on it8628 Super I/O fan controller
 
-# --- Hwmon scan function ---
-# Use: sudo ./gpu-fan-control.sh --scan  (or run hw_scan.sh for more detail)
-scan_hwmon() {
-  echo "=== Hardware Monitor Devices ==="
-  echo
-  for h in /sys/class/hwmon/hwmon*; do
-    name=$(cat "$h/name" 2>/dev/null)
-    [ -z "$name" ] && continue
-    real_path=$(readlink -f "$h" 2>/dev/null)
-    pci=$(echo "$real_path" | grep -oP '0000:[0-9a-f]{4}:[0-9a-f]{2}\.[0-9a-f]' | head -1)
-    temp=$(cat "$h/temp1_input" 2>/dev/null)
-    fan=$(cat "$h/fan1_input" 2>/dev/null)
-    case "$name" in
-      amdgpu|nvidia*|radeon*)
-        temp_c=$((temp / 1000))
-        echo "[GPU]  $h  ($name)"
-        [ -n "$pci" ] && echo "       PCI: $pci"
-        [ -n "$temp" ] && echo "       Temp: ${temp_c}°C"
-        [ -n "$fan" ] && echo "       Fan1: ${fan} RPM"
-        ;;
-      it8628|it87*|nct677*|w8362*)
-        echo "[I/O]  $h  ($name)"
-        for i in 1 2 3 4 5; do
-          fi_val=$(cat "$h/fan${i}_input" 2>/dev/null)
-          pi_val=$(cat "$h/pwm${i}" 2>/dev/null)
-          pie_val=$(cat "$h/pwm${i}_enable" 2>/dev/null)
-          [ -n "$fi_val" ] || [ -n "$pi_val" ] && echo "       Fan${i}: ${fi_val:-N/A} RPM | PWM${i}: ${pi_val:-N/A} (mode: ${pie_val:-auto})"
-        done
-        ;;
-      nvme*)
-        temp_c=$((temp / 1000))
-        echo "[NVMe] $h  ($name)"
-        [ -n "$pci" ] && echo "       PCI: $pci"
-        [ -n "$temp" ] && echo "       Temp: ${temp_c}°C"
-        ;;
-      k10temp|zenpower*)
-        temp_c=$((temp / 1000))
-        echo "[CPU]  $h  ($name)"
-        [ -n "$temp" ] && echo "       Temp: ${temp_c}°C"
-        ;;
-      *)
-        echo "[      ] $h  ($name)"
-        ;;
-    esac
-    echo
-  done
-}
-
-# CLI: scan mode
-if [ "${1}" = "--scan" ] || [ "${1}" = "-s" ]; then
-  scan_hwmon
-  exit 0
-fi
-
 # Device configuration
 # amdgpu temp is at hwmon5, fan controlled via it8628 Super I/O at hwmon3/pwm3
 GPU_TEMP_SENSOR="/sys/class/hwmon/hwmon5/temp1_input"
