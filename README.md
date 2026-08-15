@@ -1,48 +1,46 @@
-# GPU Fan Control Script Documentation
+# GPU Fan Control
+
+Automatic GPU temperature-based fan control for Linux systems.
 
 ## Overview
-This script controls system fans based on GPU temperature. It provides automatic temperature-based fan control by reading GPU temperature sensors and adjusting system fan PWM values accordingly.
 
-## Features
-- Automatic GPU temperature monitoring (AMD MI50)
-- Two-wavelength hysteresis fan control (65°C / 35°C)
-- Two script variants: hardcoded paths or dynamic hwmon discovery
-- Systemd service integration for automatic startup
-- Installation and uninstallation scripts
+Reads GPU temperature and adjusts motherboard fan speed via PWM. Uses a simple hysteresis algorithm to avoid fan oscillation:
+
+- **Fan max speed**: activates above 65°C
+- **Fan min speed**: drops below 35°C
+- **Between 35–65°C**: maintains current speed
+
+This prevents the fan from chattering back and forth between speeds during temperature fluctuations.
 
 ## Hardware
-This script is configured for:
-- **GPU**: AMD Instinct MI50 (PCI 0000:03:00)
-- **Temp sensor**: amdgpu hwmon device
-- **Fan controller**: it8628 Super I/O chip (motherboard fan header 3)
+
+Configured for:
+
+| Component | Device | Path |
+|---|---|---|
+| GPU | AMD Instinct MI50 (PCI `0000:03:00`) | `amdgpu` hwmon |
+| Temperature | GPU die temp sensor | `hwmonX/temp1_input` |
+| Fan controller | it8628 Super I/O | `hwmonY/pwm3` (fan header 3) |
 
 ## Variants
 
-### gpu-fan-control.sh (hardcoded)
-Uses fixed hwmon device indices. Simpler and faster startup, but will break if the kernel assigns different hwmon indices after a reboot or update.
+### `gpu-fan-control.sh` — Hardcoded paths
 
-### gpu-fan-control-dynamic.sh (recommended)
-Dynamically discovers hwmon devices at startup by matching:
-- amdgpu → PCI address `0000:03:00` (the MI50)
-- it8628 → driver name (Super I/O fan controller)
-Resilient to hwmon index shifts — recommended if you want to avoid future breakage.
+Uses fixed hwmon device indices. Simple and fast, but will break if the kernel assigns different hwmon indices after a reboot or kernel update.
 
-## Requirements
-- Linux system with hardware monitoring support
-- GPU with hwmon sensor (NVIDIA, AMD, or other)
-- Motherboard with PWM fan control headers
-- Root privileges to access sensor files
+### `gpu-fan-control-dynamic.sh` — Dynamic discovery (recommended)
 
-## Installation
+Discovers hwmon devices at runtime:
 
-### Automated Installation (recommended)
-Run the installation script as root:
-```bash
-sudo ./install.sh
-```
+1. **amdgpu** — matched by PCI address (`0000:03:00`), so it won't pick up your second GPU
+2. **it8628** — matched by driver name (only one Super I/O on the system)
 
-### Install Dynamic Version
-To use the dynamic discovery script instead:
+Resilient to hwmon index shifts. This is the variant you want if you don't want to fix the script after every kernel update.
+
+## Quick Start
+
+### Install the dynamic version
+
 ```bash
 sudo cp gpu-fan-control-dynamic.sh /usr/local/bin/
 sudo chmod +x /usr/local/bin/gpu-fan-control-dynamic.sh
@@ -51,191 +49,98 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now gpu-fan-control-dynamic.service
 ```
 
-### Manual Installation
-1. Copy script to `/usr/local/bin/gpu-fan-control.sh`
-2. Make executable: `sudo chmod +x /usr/local/bin/gpu-fan-control.sh`
-3. Create systemd service:
-```ini
-[Unit]
-Description=GPU Fan Control Service
-After=multi-user.target
+### Check it's running
 
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/gpu-fan-control.sh
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
+```bash
+systemctl status gpu-fan-control-dynamic.service
+journalctl -u gpu-fan-control-dynamic.service -f
 ```
-4. Enable service: `sudo systemctl enable gpu-fan-control.service`
 
-### Automated Installation
-Run the installation script:
+### Automated install
+
 ```bash
 sudo ./install.sh
 ```
 
-### Automated Uninstallation
-Run the uninstallation script:
+## Configuration
+
+All settings are at the top of the script:
+
 ```bash
-sudo ./uninstall.sh
+# Device paths (hardcoded variant)
+GPU_TEMP_SENSOR="/sys/class/hwmon/hwmon5/temp1_input"
+GPU_FAN_PWM="/sys/class/hwmon/hwmon3/pwm3"
+PWM_ENABLE="/sys/class/hwmon/hwmon3/pwm3_enable"
+
+# Fan speeds (0–255 range)
+MIN_PWM=90          # Low fan speed
+MAX_PWM=210         # High fan speed
+
+# Temperature thresholds
+TEMP_THRESHOLD_HIGH=65   # Above this → max speed
+TEMP_THRESHOLD_LOW=35    # Below this → min speed
 ```
 
-## Configuration Variables
+## How It Works
 
-### Basic Settings
-- `GPU_TEMP_SENSOR`: Path to the GPU temperature sensor
-- `GPU_FAN_PWM`: Path to the fan PWM control
-- `PWM_ENABLE`: Path to the PWM enable control (set to 1 for manual mode)
-
-### Temperature Thresholds
-- `TEMP_THRESHOLD_HIGH`: Fan max speed activates above this (default: 65°C)
-- `TEMP_THRESHOLD_LOW`: Fan drops to min speed below this (default: 35°C)
-
-### PWM Control Settings
-- `MIN_PWM`: Minimum PWM value for low fan speed (default: 90)
-- `MAX_PWM`: Maximum PWM value for high fan speed (default: 210)
-
-The hysteresis window (35°C–65°C) prevents the fan from oscillating between speeds.
-
-## Sensor Detection
-
-The script includes automatic sensor detection functions that identify available sensors on your system. This helps ensure correct configuration without manual path identification.
-
-## Testing Functions
-
-### test_fans()
-This function allows manual testing of fan operation at various PWM values to determine:
-- Minimum effective PWM value
-- Maximum PWM value
-- Fan behavior across different speeds
-
-## Usage
-
-### Normal Operation
-```bash
-sudo ./gpu-fan-control.sh
+```
+GPU temp >  65°C  →  fan to MAX_PWM (210)
+GPU temp <  35°C  →  fan to MIN_PWM (90)
+Between 35–65°C  →  keep current speed (hysteresis)
 ```
 
-### Command Line Options
+The script:
+
+1. On startup, writes `1` to `pwmX_enable` to set manual mode
+2. Enters a 10-second poll loop
+3. Reads `temp1_input` (millidegrees Celsius) from the amdgpu hwmon
+4. Writes the computed PWM value to the it8628 Super I/O fan header
+
+## Finding Your Devices
+
+If you need to adapt this to different hardware:
+
 ```bash
-sudo ./gpu-fan-control.sh --detect-sensors    # Detect sensors
-sudo ./gpu-fan-control.sh --test-fans         # Test fan operation
-sudo ./gpu-fan-control.sh --help              # Show help
-```
-
-## Finding Available Sensors
-
-Use these commands to locate sensors on your system:
-
-```bash
-# List all hardware monitor directories
-ls -la /sys/class/hwmon/
-
-# Check all sensors and their values
-for i in /sys/class/hwmon/hwmon*; do
-  if [ -d "$i" ]; then
-    echo "=== $i ==="
-    if [ -f "$i/name" ]; then
-      echo "Name: $(cat $i/name)"
-    fi
-    if [ -f "$i/temp1_input" ]; then
-      echo "Temp1: $(cat $i/temp1_input) m°C"
-    fi
-    if [ -f "$i/pwm1" ]; then
-      echo "PWM1: $(cat $i/pwm1)"
-    fi
-    if [ -f "$i/pwm2" ]; then
-      echo "PWM2: $(cat $i/pwm2)"
-    fi
-    echo
-  fi
+# List all hwmon devices
+for h in /sys/class/hwmon/hwmon*; do
+  echo "$(basename $h): $(cat $h/name 2>/dev/null) → $(readlink -f $h)"
 done
 
-# Identify GPU sensors specifically
-for i in /sys/class/hwmon/hwmon*; do
-  if [ -d "$i" ]; then
-    if [ -f "$i/name" ]; then
-      name=$(cat $i/name)
-      if [[ "$name" == *"amdgpu"* ]] || [[ "$name" == *"nvidia"* ]] || [[ "$name" == *"radeon"* ]]; then
-        echo "Found GPU sensor at $i"
-        echo "Name: $name"
-        if [ -f "$i/temp1_input" ]; then
-          echo "Temp1: $(cat $i/temp1_input) m°C"
-        fi
-      fi
-    fi
-  fi
+# Find your GPU's amdgpu device
+for h in /sys/class/hwmon/hwmon*; do
+  [ "$(cat $h/name 2>/dev/null)" = "amdgpu" ] && \
+    readlink -f $h | grep -q "0000:03:00" && echo "$(basename $h)"
 done
 
-# Check motherboard PWM controls
-for i in /sys/class/hwmon/hwmon*; do
-  if [ -d "$i" ]; then
-    if [ -f "$i/name" ]; then
-      name=$(cat $i/name)
-      if [[ "$name" == *"it8628"* ]] || [[ "$name" == *"pwm"* ]]; then
-        echo "Found PWM controller at $i"
-        echo "Name: $name"
-        if [ -f "$i/pwm1" ]; then
-          echo "PWM1: $(cat $i/pwm1)"
-        fi
-        if [ -f "$i/pwm2" ]; then
-          echo "PWM2: $(cat $i/pwm2)"
-        fi
-      fi
-    fi
-  fi
+# Find the Super I/O
+for h in /sys/class/hwmon/hwmon*; do
+  [ "$(cat $h/name 2>/dev/null)" = "it8628" ] && echo "$(basename $h)"
 done
 ```
-
-## PWM Value Ranges
-
-PWM values typically range from 0-255:
-- 0: Fan off
-- 30-50: Very low speed (idle)
-- 100-150: Low to medium speed
-- 200-255: High speed (full)
-- The specific range and response may vary depending on your fan hardware
 
 ## Troubleshooting
 
-### Common Issues
-1. **Permissions**: Ensure script is run with `sudo` privileges
-2. **Sensor Paths**: Confirm sensor paths exist using detection commands
-3. **Fan Headers**: Verify your motherboard supports PWM control
-4. **Manual Mode**: Ensure PWM is in manual mode (`pwmX_enable` set to 1)
-5. **hwmon index shifts**: If the hardcoded script breaks after a kernel update, switch to the dynamic version
+### Fan not spinning
+- Check that `pwmX_enable` is set to `1` (manual mode)
+- Verify the fan is plugged into the correct motherboard header
+- Read the fan RPM directly: `cat /sys/class/hwmon/hwmon3/fan3_input`
 
-### hwmon Index Shifts
-The kernel assigns hwmon indices dynamically. After a kernel update or module reload, indices can change (e.g., `hwmon1` → `hwmon3`). The **dynamic script** handles this automatically — if the hardcoded script stops working, see the install instructions above for the dynamic version.
+### Service failing after reboot
+The kernel assigns hwmon indices dynamically. If your hardcoded script breaks, switch to the dynamic variant.
 
-### Sensor Detection Failure
-If sensors aren't found:
-- Check that hardware monitoring modules are loaded (`sudo modprobe hwmon`)
-- Verify hardware is properly detected (`lspci | grep VGA`)
-- Confirm correct paths using the detection commands above
-- Use the dynamic script variant which discovers devices automatically
+### Verify the correct device
+```bash
+# What temp does the amdgpu report?
+cat /sys/class/hwmon/hwmon5/temp1_input   # millidegrees
 
-## Customization
-
-To customize for different hardware:
-1. Modify `GPU_TEMP_SENSOR` to point to your GPU sensor
-2. Modify `GPU_FAN_PWM` to point to your fan header
-3. Adjust temperature thresholds (`MIN_TEMP`, `MAX_TEMP`)
-4. Adjust PWM range (`MIN_PWM`, `MAX_PWM`) based on testing
-
-## System Integration
-
-The script includes systemd service integration for automatic startup. The installation script will set this up automatically, or you can manually create the service file as shown in the installation section.
-
-## Support
-
-For issues or questions, please contact the author or submit a bug report to the project repository.
+# What's the fan doing?
+cat /sys/class/hwmon/hwmon3/pwm3            # PWM duty cycle
+cat /sys/class/hwmon/hwmon3/pwm3_enable     # 1=manual, 2=auto
+cat /sys/class/hwmon/hwmon3/fan3_input      # RPM
+```
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License — see [LICENSE](LICENSE)
 
 Copyright (c) 2026 Chris Harris
