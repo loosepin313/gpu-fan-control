@@ -47,6 +47,8 @@ Three modes, selected with `CONTROL_MODE`:
 
 The ceiling override is separate from the mode and always wins. It is **latched**: once the ceiling trips, the fan stays at full blast until the sensor falls back by `CEILING_HYSTERESIS`, so a reading hovering on the limit cannot flap the fan between extremes every poll.
 
+Set `CEILING_TEMP` as an emergency brake, not the operating target — see [backing off for noise](#backing-off-for-noise). If the band's `TEMP_THRESHOLD_HIGH` sits at or near the ceiling, the override fires in normal operation and you get sudden full-blast bursts instead of a smooth ramp.
+
 ## Configuration
 
 `/etc/gpu-fan-control.conf`. Every option has a default in the script; the config overrides them.
@@ -165,6 +167,40 @@ idle: duty 60 = 1660 RPM, junction 36 C
 
 That is the honest lesson: **a fan curve has a power ceiling.** Below it you get silence; above it you need a power cap, better airflow, or a bigger fan.
 
+### Backing off for noise
+
+An 80 °C junction ceiling was over-engineering. AMD's guidance for the MI50 puts **ideal junction under load at 85–100 °C** (edge 60–80 °C), with junction critical around 100 °C and throttling above that. Holding 76 °C was spending a lot of acoustic budget for no reliability gain.
+
+Re-deriving the band from the same table, with the ceiling demoted to an emergency brake at 95 °C:
+
+| | v2.0 tuning | quiet tuning |
+|---|---|---|
+| band | 55 → 74 °C | 58 → 86 °C |
+| duty range | 60 – 220 | 50 – 180 |
+| **loop gain** | **8.4 duty/°C** | **4.6 duty/°C** |
+| idle | 1664 RPM | 1386 RPM |
+| ceiling | 80 °C (frequently tripping) | 95 °C (never tripped) |
+
+Measured under the same 3-stream load:
+
+| metric | v2.0 | quiet |
+|---|---|---|
+| avg fan | 4209 RPM | **2802 RPM** |
+| peak fan | 4687 RPM | 3391 RPM |
+| avg duty | 199 | 113 |
+| avg junction | 73.3 °C | 77.1 °C |
+| peak junction | 76 °C | 84 °C |
+| peak mem | 58 °C | 64 °C |
+
+**A third quieter in fan speed for 4 °C of junction.** Two things made it work:
+
+- The narrow 19 °C band was the actual cause of "ramps up too fast". Widening it to 28 °C nearly halves the loop gain, so the fan creeps up instead of lunging.
+- Duty 180 holds junction ~87 °C at the 192 W peaks while duty 220 holds ~84 °C. Six hundred RPM for three degrees is a bad trade.
+
+The controller peaked at duty 142 and never reached `MAX_PWM=180`, so there is still headroom — the ceiling at 95 °C stayed 11 °C away from ever firing.
+
+The power cap is what makes this possible. Uncapped at 225 W, holding junction under 95 °C needs duty ~255 (5200 RPM). Capped at 180 W, duty 180 is enough. **The cap is not protecting the card here — it is what keeps the fan off its top end.**
+
 ## Can I just use the GPU's own fan percentage?
 
 Yes, and it is implemented as `CONTROL_MODE="mirror"` — but it is not the primary law, and the reason is instructive.
@@ -180,6 +216,8 @@ The problem is the range. The driver only ever asks for **37–63 out of 255 (14
 **Fan at full speed and won't come down.** The ceiling latch is engaged — check the actual sensor, not the fan. It releases at `CEILING_TEMP - CEILING_HYSTERESIS`.
 
 **Fan flaps between two speeds.** Raise `TEMP_AVG_N` and `PWM_STEP`, and widen the band. Also check you are not controlling on a laggy sensor (`edge`).
+
+**Fan lunges up suddenly under load.** The band is too narrow — `MAX_PWM` is being reached only a few degrees above `MIN_PWM`, so the loop gain is high. Widen `TEMP_THRESHOLD_HIGH` toward the top of the card's safe junction range and lower `MAX_PWM` to the smallest duty that holds your target. See the worked example: gain 8.4 → 4.6 duty/°C was the whole fix.
 
 **Service fails after reboot.** Usually the Super I/O driver registering late. The unit has `Wants=lm_sensors.service` and a 15 s `ExecStartPre` sleep for this. If your board needs longer, increase the sleep.
 
