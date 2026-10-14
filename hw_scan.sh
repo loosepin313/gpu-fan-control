@@ -38,11 +38,22 @@ for h in /sys/class/hwmon/hwmon*; do
 
   case "$name" in
     amdgpu|nvidia*|radeon*)
-      temp_c=$((temp / 1000))
       echo "[GPU]  $h  ($name)"
       [ -n "$pci" ] && echo "       PCI: $pci"
-      [ -n "$temp" ] && echo "       Temp: ${temp_c}°C"
+      # Show every labelled temperature sensor. On MI50/MI60 these are
+      # edge / junction / mem, and junction is the one that runs away first -
+      # temp1 is NOT necessarily the sensor you want to control on.
+      i=1
+      while [ $i -le 10 ]; do
+        lab=$(cat "$h/temp${i}_label" 2>/dev/null)
+        val=$(cat "$h/temp${i}_input" 2>/dev/null)
+        if [ -n "$val" ]; then
+          printf '       Temp: %-9s %s C\n' "${lab:-temp$i}" "$(( val / 1000 ))"
+        fi
+        i=$((i + 1))
+      done
       [ -n "$fan" ] && echo "       Fan1: ${fan} RPM"
+      [ -n "$pwm" ] && echo "       GpuFanDemand: ${pwm}/255"
       echo
       ;;
     it8628|it87*|nct677*|w8362*)
@@ -82,9 +93,9 @@ done
 # If filtered by PCI, also show how to configure the dynamic script
 if [ "$1" = "--pci" ] && [ -n "$2" ]; then
   echo "=== PCI: $2 ==="
-  echo "Use this PCI address in gpu-fan-control-dynamic.sh:"
+  echo "Use this PCI address in /etc/gpu-fan-control.conf:"
   echo "  GPU_PCI=\"$2\""
   echo
-  echo "Or run the dynamic scan for just this GPU:"
-  echo "  $0 --pci $2"
+  echo "Then find which fan header you are actually on:"
+  echo "  sudo fan_probe.sh"
 fi

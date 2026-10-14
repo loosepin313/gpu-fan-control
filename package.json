@@ -1,13 +1,13 @@
 {
   "name": "gpu-fan-control",
-  "version": "1.0.0",
-  "description": "A tool for controlling GPU fan speeds",
+  "version": "2.0.0",
+  "description": "Temperature-based chassis fan control for passively cooled GPU cards (AMD Instinct MI25/MI50/MI60)",
   "main": "gpu-fan-control.sh",
   "scripts": {
     "start": "./gpu-fan-control.sh",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["gpu", "fan", "control", "nvidia", "amd"],
-  "author": "GPU Fan Control Team",
+  "keywords": ["gpu", "fan", "pwm", "hwmon", "amd", "instinct", "mi50", "linux", "systemd"],
+  "author": "Chris Harris",
   "license": "MIT"
 }
